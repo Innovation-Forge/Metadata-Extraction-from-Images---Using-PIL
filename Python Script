@@ -1,0 +1,92 @@
+# Import necessary libraries
+import os
+from PIL import Image
+from PIL.ExifTags import TAGS, GPSTAGS
+import csv
+from prettytable import PrettyTable
+
+# Function to extract GPS dictionary from an image file
+def extract_gps_dictionary(file_name):
+    try:
+        pil_image = Image.open(file_name)
+        exif_data = pil_image._getexif()
+    except Exception as e:
+        print(f"Error processing image {file_name}: {e}")
+        return None, None
+
+    gps_dictionary = {}
+    if exif_data:
+        for tag, value in exif_data.items():
+            tag_value = TAGS.get(tag, tag)
+            if tag_value == "GPSInfo":
+                for t in value:
+                    sub_tag = GPSTAGS.get(t, t)
+                    gps_dictionary[sub_tag] = value[t]
+        if gps_dictionary:
+            return gps_dictionary, exif_data
+    return None, None
+
+# Function to convert GPS data to latitude and longitude
+def extract_lat_lon(gps):
+    if "GPSLatitude" in gps and "GPSLongitude" in gps:
+        lat = convert_to_degrees(gps["GPSLatitude"], gps["GPSLatitudeRef"])
+        lon = convert_to_degrees(gps["GPSLongitude"], gps["GPSLongitudeRef"])
+        if lat is not None and lon is not None:
+            return lat, lon
+    return None, None
+
+# Helper function to convert GPS coordinates to degrees
+def convert_to_degrees(value, ref):
+    try:
+        d = float(value[0])
+        m = float(value[1])
+        s = float(value[2])
+        if d == 0 and m == 0 and s == 0:
+            print("Invalid GPS coordinate: all components are zero.")
+            return None
+        result = d + (m / 60.0) + (s / 3600.0)
+        if ref in ['S', 'W']:
+            result = -result
+        return result
+    except ZeroDivisionError:
+        print("Encountered a division by zero error.")
+        return None
+    except Exception as e:
+        print(f"Unexpected error converting GPS data: {e}")
+        return None
+
+# Main function to process images in a directory
+def process_images(directory):
+    if not os.path.isdir(directory):
+        print("The provided path is not a directory.")
+        return
+
+    results = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(".jpg"):
+                file_path = os.path.join(root, file)
+                gps_data, _ = extract_gps_dictionary(file_path)
+                if gps_data:
+                    lat, lon = extract_lat_lon(gps_data)
+                    if lat is not None and lon is not None:
+                        results.append((file, lat, lon))
+
+    # Create CSV file with GPS coordinates
+    with open('gps_coordinates.csv', 'w', newline='') as csvfile:
+        fieldnames = ['File Name', 'Latitude', 'Longitude']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in results:
+            writer.writerow({'File Name': result[0], 'Latitude': result[1], 'Longitude': result[2]})
+
+    # Generate report using PrettyTable
+    table = PrettyTable(['File Name', 'Latitude', 'Longitude'])
+    for result in results:
+        table.add_row(result)
+    print(table)
+
+# Execute the main function if the script is run directly
+if __name__ == "__main__":
+    directory_path = input("Enter the path to the directory containing JPEG files: ")
+    process_images(directory_path)
